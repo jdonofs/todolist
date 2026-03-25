@@ -33,6 +33,7 @@
       margin: 0 auto; padding-bottom: 100px;
       -webkit-font-smoothing: antialiased;
     }
+    button, input, select, textarea { touch-action: manipulation; }
 
     /* ── Header ── */
     .header { position: sticky; top: 0; z-index: 90; background: var(--bg); border-bottom: 1px solid var(--border); }
@@ -211,7 +212,7 @@
 
 <header class="header">
   <div class="header-row1">
-    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.8</span></div>
+    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.9</span></div>
     <div class="section-tabs">
       <button class="stab active" data-s="all">All</button>
       <button class="stab" data-s="work">Work</button>
@@ -373,6 +374,8 @@ let notified = new Set();
 let expanded = new Set();   // task ids with subtasks expanded
 let modalSubs = [];         // subtasks being edited in modal
 let modalSubEditId = null;
+let saveTimer = null;
+let archiveSaveTimer = null;
 
 const TASKS_KEY   = 'tadoo_tasks';
 const ARCHIVE_KEY = 'tadoo_archive';
@@ -406,8 +409,34 @@ function loadData() {
   });
   if (repaired) save();
 }
-function save()        { localStorage.setItem(TASKS_KEY,   JSON.stringify(tasks));   }
-function saveArchive() { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archive)); }
+function writeTasksNow() { localStorage.setItem(TASKS_KEY, JSON.stringify(tasks)); }
+function writeArchiveNow() { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archive)); }
+function save() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    writeTasksNow();
+  }, 40);
+}
+function saveArchive() {
+  if (archiveSaveTimer) clearTimeout(archiveSaveTimer);
+  archiveSaveTimer = setTimeout(() => {
+    archiveSaveTimer = null;
+    writeArchiveNow();
+  }, 40);
+}
+function flushPendingSaves() {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    writeTasksNow();
+  }
+  if (archiveSaveTimer) {
+    clearTimeout(archiveSaveTimer);
+    archiveSaveTimer = null;
+    writeArchiveNow();
+  }
+}
 
 // ── Utils ──────────────────────────────────────────────
 let _ub = Date.now();
@@ -416,6 +445,11 @@ function uid() { return (++_ub).toString(36) + Math.random().toString(36).slice(
 function esc(s) {
   if (!s) return '';
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function blurActiveControl() {
+  const el = document.activeElement;
+  if (el && typeof el.blur === 'function') el.blur();
 }
 
 function parseDate(s) {
@@ -1110,6 +1144,7 @@ function setSubtaskSort(taskId, value) {
 }
 
 function toggleSubtask(taskId, subId) {
+  blurActiveControl();
   const task = tasks.find(t=>t.id===taskId);
   if (!task||!task.subtasks) return;
   const sub = task.subtasks.find(s=>s.id===subId);
@@ -1159,6 +1194,7 @@ function toggleExpand(id) {
 }
 
 function completeTask(id) {
+  blurActiveControl();
   const idx = tasks.findIndex(t=>t.id===id);
   if (idx===-1) return;
   const task = tasks[idx];
@@ -1451,6 +1487,8 @@ initNotifBanner();
 render();
 checkNotifs();
 setInterval(checkNotifs, 60000);
+window.addEventListener('beforeunload', flushPendingSaves);
+document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState === 'hidden') flushPendingSaves(); });
 
 renderArchive = function(el) {
   let entries = sect==='all' ? archive : archive.filter(e=>e.section===sect);
