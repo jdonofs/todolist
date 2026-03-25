@@ -44,6 +44,9 @@
     .app-name { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; display: flex; align-items: baseline; gap: 6px; }
     .app-name span { color: var(--accent); }
     .app-ver { font-size: 10px; color: var(--muted); font-weight: 500; background: var(--surface2); padding: 2px 6px; border-radius: 999px; border: 1px solid var(--border); }
+    .bizday-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .bizday-row select { width: auto; flex-shrink: 0; }
+    .bizday-note { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
     .section-tabs { display: flex; gap: 2px; background: var(--surface); padding: 3px; border-radius: 999px; border: 1px solid var(--border); }
     .stab { padding: 5px 14px; border-radius: 999px; border: none; background: none; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
     .stab.active { background: var(--surface2); color: var(--text); }
@@ -191,7 +194,7 @@
 
 <header class="header">
   <div class="header-row1">
-    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.2</span></div>
+    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.3</span></div>
     <div class="section-tabs">
       <button class="stab active" data-s="all">All</button>
       <button class="stab" data-s="work">Work</button>
@@ -248,6 +251,7 @@
           <option value="daily">Daily</option>
           <option value="weekly">Weekly — pick days</option>
           <option value="monthly">Monthly — pick dates</option>
+          <option value="bizday">Monthly — Nth business day</option>
           <option value="yearly">Yearly</option>
         </select>
       </div>
@@ -266,6 +270,19 @@
       <div class="fg hidden" id="monthlyRow">
         <label class="fl">Day(s) of the month</label>
         <div class="dom-grid" id="domGrid"></div>
+      </div>
+      <div class="fg hidden" id="bizdayRow">
+        <label class="fl">Business day of the month</label>
+        <div class="bizday-row">
+          <select id="fBizday" style="width:auto">
+            <option value="1">1st</option><option value="2">2nd</option><option value="3">3rd</option>
+            <option value="4">4th</option><option value="5">5th</option><option value="6">6th</option>
+            <option value="7">7th</option><option value="8">8th</option><option value="9">9th</option>
+            <option value="10">10th</option><option value="15">15th</option><option value="20">20th</option>
+          </select>
+          <span style="font-size:14px;color:var(--muted)">business day</span>
+        </div>
+        <div class="bizday-note">Skips weekends &amp; US federal holidays. E.g. "5th business day" in March 2025 = March 7.</div>
       </div>
       <div class="form-row">
         <div class="fg">
@@ -400,7 +417,78 @@ function recLbl(rec) {
   if (rec.type === 'monthly') {
     return '↺ ' + ((rec.daysOfMonth||[]).slice().sort((a,b)=>a-b).join(', ') || 'Monthly');
   }
+  if (rec.type === 'bizday') {
+    const n = rec.bizDayN||1;
+    const suffix = n===1?'st':n===2?'nd':n===3?'rd':'th';
+    return `↺ ${n}${suffix} biz day`;
+  }
   return null;
+}
+
+// ── US Federal Holidays ────────────────────────────────
+// Returns Set of "YYYY-MM-DD" strings for a given year
+function usFederalHolidays(year) {
+  const holidays = new Set();
+
+  function addObserved(d) {
+    // Saturday → Friday, Sunday → Monday
+    const day = d.getDay();
+    if (day === 6) d.setDate(d.getDate() - 1);
+    else if (day === 0) d.setDate(d.getDate() + 1);
+    holidays.add(ymd(d));
+  }
+
+  function nthWeekday(y, month, weekday, n) {
+    // n=1 first, n=-1 last
+    if (n > 0) {
+      const d = new Date(y, month, 1);
+      while (d.getDay() !== weekday) d.setDate(d.getDate() + 1);
+      d.setDate(d.getDate() + (n - 1) * 7);
+      return d;
+    } else {
+      const d = new Date(y, month + 1, 0); // last day of month
+      while (d.getDay() !== weekday) d.setDate(d.getDate() - 1);
+      return d;
+    }
+  }
+
+  // Fixed-date holidays
+  addObserved(new Date(year, 0, 1));   // New Year's Day
+  addObserved(new Date(year, 5, 19));  // Juneteenth
+  addObserved(new Date(year, 6, 4));   // Independence Day
+  addObserved(new Date(year, 10, 11)); // Veterans Day
+  addObserved(new Date(year, 11, 25)); // Christmas
+
+  // Floating holidays
+  holidays.add(ymd(nthWeekday(year, 0, 1, 3)));  // MLK Day: 3rd Mon Jan
+  holidays.add(ymd(nthWeekday(year, 1, 1, 3)));  // Presidents Day: 3rd Mon Feb
+  holidays.add(ymd(nthWeekday(year, 4, 1, -1))); // Memorial Day: last Mon May
+  holidays.add(ymd(nthWeekday(year, 8, 1, 1)));  // Labor Day: 1st Mon Sep
+  holidays.add(ymd(nthWeekday(year, 9, 1, 2)));  // Columbus Day: 2nd Mon Oct
+  holidays.add(ymd(nthWeekday(year, 10, 4, 4))); // Thanksgiving: 4th Thu Nov
+
+  return holidays;
+}
+
+function isBusinessDay(date) {
+  const dow = date.getDay();
+  if (dow === 0 || dow === 6) return false;
+  const holidays = usFederalHolidays(date.getFullYear());
+  return !holidays.has(ymd(date));
+}
+
+// Find the Nth business day of a given month/year (1-indexed)
+function nthBusinessDay(year, month, n) {
+  const d = new Date(year, month, 1);
+  let count = 0;
+  while (d.getMonth() === month) {
+    if (isBusinessDay(d)) {
+      count++;
+      if (count === n) return new Date(d);
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  return null; // month has fewer than n business days
 }
 
 // ── Recurrence ─────────────────────────────────────────
@@ -431,6 +519,20 @@ function nextOccurrence(task) {
     while (n <= from) n.setFullYear(n.getFullYear()+1);
     return ymd(n);
   }
+
+  if (rec.type === 'bizday') {
+    const nth = rec.bizDayN || 1;
+    // Try next month first, then the month after, etc.
+    let yr = from.getFullYear(), mo = from.getMonth() + 1; // start from next month
+    for (let i = 0; i < 13; i++) {
+      if (mo > 11) { mo = 0; yr++; }
+      const d = nthBusinessDay(yr, mo, nth);
+      if (d && d > from) return ymd(d);
+      mo++;
+    }
+    return null;
+  }
+
   return null;
 }
 
@@ -671,6 +773,7 @@ function openEdit(id) {
   document.getElementById('fRec').value = rec.type; syncRecUI();
   document.querySelectorAll('.dchip').forEach(b=>b.classList.toggle('sel', rec.type==='weekly'&&(rec.daysOfWeek||[]).includes(+b.dataset.d)));
   document.querySelectorAll('.dom-btn').forEach(b=>b.classList.toggle('sel', rec.type==='monthly'&&(rec.daysOfMonth||[]).includes(+b.dataset.day)));
+  if (rec.type==='bizday') document.getElementById('fBizday').value = rec.bizDayN||1;
   renderModalSubs();
   document.getElementById('deleteRow').style.display = 'block';
   document.getElementById('overlay').classList.remove('hidden');
@@ -690,6 +793,7 @@ function syncRecUI() {
   const v = document.getElementById('fRec').value;
   document.getElementById('weeklyRow').classList.toggle('hidden',  v!=='weekly');
   document.getElementById('monthlyRow').classList.toggle('hidden', v!=='monthly');
+  document.getElementById('bizdayRow').classList.toggle('hidden',  v!=='bizday');
 }
 
 // Modal subtasks
@@ -729,6 +833,7 @@ document.getElementById('taskForm').addEventListener('submit', e => {
   const recurrence = {type:recType};
   if (recType==='weekly')  recurrence.daysOfWeek  = [...document.querySelectorAll('.dchip.sel')].map(b=>+b.dataset.d);
   if (recType==='monthly') recurrence.daysOfMonth = [...document.querySelectorAll('.dom-btn.sel')].map(b=>+b.dataset.day);
+  if (recType==='bizday')  recurrence.bizDayN     = +document.getElementById('fBizday').value;
   const subtasks = [...modalSubs];
   if (editId) {
     const idx = tasks.findIndex(t=>t.id===editId);
