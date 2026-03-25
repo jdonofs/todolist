@@ -106,6 +106,8 @@
 
     /* ── Subtask area ── */
     .subtask-area { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .subtask-topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .subtask-topbar select { width: auto; min-width: 120px; padding: 6px 28px 6px 10px; font-size: 12px; }
     .subtask-item { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0; }
     .st-check { flex-shrink: 0; width: 17px; height: 17px; border-radius: 4px; border: 1.5px solid var(--border); background: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.12s; color: transparent; }
     .st-check.done { background: var(--success); border-color: var(--success); color: #fff; }
@@ -113,6 +115,10 @@
     .st-label { font-size: 13px; color: var(--text); cursor: pointer; }
     .st-label.done { text-decoration: line-through; color: var(--muted); }
     .st-meta { margin-top: 3px; font-size: 11px; color: var(--muted); }
+    .st-tools { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+    .st-edit { width: 22px; height: 22px; border: none; background: none; color: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.12s; flex-shrink: 0; }
+    .subtask-item:hover .st-edit { color: var(--muted); }
+    .st-edit:hover { background: var(--surface2); color: var(--text) !important; }
     .st-del { width: 22px; height: 22px; border: none; background: none; color: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.12s; flex-shrink: 0; }
     .subtask-item:hover .st-del { color: var(--muted); }
     .st-del:hover { background: rgba(239,68,68,0.1); color: var(--danger) !important; }
@@ -184,6 +190,8 @@
     .modal-st-copy { flex: 1; min-width: 0; }
     .modal-st-title { font-size: 14px; }
     .modal-st-meta { margin-top: 3px; font-size: 11px; color: var(--muted); }
+    .modal-st-edit { width: 24px; height: 24px; border: none; background: none; color: var(--muted); cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px; }
+    .modal-st-edit:hover { background: var(--surface2); color: var(--text); }
     .modal-st-del { width: 24px; height: 24px; border: none; background: none; color: var(--muted); cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px; }
     .modal-st-del:hover { background: rgba(239,68,68,0.1); color: var(--danger); }
     .modal-st-add { display: flex; gap: 8px; margin-top: 6px; }
@@ -203,7 +211,7 @@
 
 <header class="header">
   <div class="header-row1">
-    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.6</span></div>
+    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.7</span></div>
     <div class="section-tabs">
       <button class="stab active" data-s="all">All</button>
       <button class="stab" data-s="work">Work</button>
@@ -364,6 +372,7 @@ let fSect    = 'work';
 let notified = new Set();
 let expanded = new Set();   // task ids with subtasks expanded
 let modalSubs = [];         // subtasks being edited in modal
+let modalSubEditId = null;
 
 const TASKS_KEY   = 'tadoo_tasks';
 const ARCHIVE_KEY = 'tadoo_archive';
@@ -380,6 +389,7 @@ function loadData() {
     const normalized = {
       ...t,
       recurrence,
+      subtaskSort: t.subtaskSort || 'due',
       subtasks: (t.subtasks || []).map(s => ({
         id: s.id || uid(),
         title: s.title || '',
@@ -655,6 +665,75 @@ function subtaskScheduleMeta(subtask, task) {
   return parts.join(' - ');
 }
 
+function subtaskDueDate(task, subtask) {
+  if (!task.dueDate) return null;
+  if (!subtask.dayOfMonth && !subtask.bizDayN) return null;
+  const base = parseDate(task.dueDate);
+  if (!base) return null;
+  const year = base.getFullYear();
+  const month = base.getMonth();
+  if (subtask.dayOfMonth) {
+    const maxDay = new Date(year, month + 1, 0).getDate();
+    return ymd(new Date(year, month, Math.min(subtask.dayOfMonth, maxDay)));
+  }
+  const d = nthBusinessDay(year, month, subtask.bizDayN);
+  return d ? ymd(d) : null;
+}
+
+function subtaskIsTodayLike(task, subtask) {
+  const date = subtaskDueDate(task, subtask);
+  if (!date) return false;
+  const fake = { dueDate: date, dueTime: null };
+  return isOverdue(fake) || isDueToday(fake);
+}
+
+function sortedSubtasks(task) {
+  const subs = (task.subtasks || []).slice();
+  if ((task.subtaskSort || 'due') === 'alpha') {
+    return subs.sort((a,b)=>a.title.localeCompare(b.title, undefined, {sensitivity:'base'}));
+  }
+  return subs.sort((a,b) => {
+    const ad = subtaskDueDate(task, a);
+    const bd = subtaskDueDate(task, b);
+    if (ad && bd) {
+      const diff = parseDate(ad) - parseDate(bd);
+      if (diff !== 0) return diff;
+      return a.title.localeCompare(b.title, undefined, {sensitivity:'base'});
+    }
+    if (ad) return -1;
+    if (bd) return 1;
+    return a.title.localeCompare(b.title, undefined, {sensitivity:'base'});
+  });
+}
+
+function todaySubtaskItems() {
+  const items = [];
+  tasks.forEach(task => {
+    if (sect !== 'all' && task.section !== sect) return;
+    sortedSubtasks(task).forEach(subtask => {
+      if (subtask.done) return;
+      const dueDate = subtaskDueDate(task, subtask);
+      if (!dueDate) return;
+      const fake = { dueDate, dueTime: null };
+      if (!(isOverdue(fake) || isDueToday(fake))) return;
+      items.push({
+        kind:'subtask',
+        id:`${task.id}:${subtask.id}`,
+        taskId: task.id,
+        subId: subtask.id,
+        section: task.section,
+        title: subtask.title,
+        parentTitle: task.title,
+        dueDate,
+        dueTime: null,
+        notes: '',
+        recurrence: null
+      });
+    });
+  });
+  return items;
+}
+
 function recLabel(rec) {
   if (!rec || rec.type === 'none') return null;
   if (rec.type === 'daily') return 'â†º Daily';
@@ -778,7 +857,7 @@ function sorted(list) {
     if (ao&&!bo) return -1; if (!ao&&bo) return 1;
     if (a.dueDate&&b.dueDate) { const diff=parseDate(a.dueDate)-parseDate(b.dueDate); if(diff!==0)return diff; return (a.dueTime||'23:59').localeCompare(b.dueTime||'23:59'); }
     if (a.dueDate) return -1; if (b.dueDate) return 1;
-    return 0;
+    return (a.title||'').localeCompare(b.title||'', undefined, {sensitivity:'base'});
   });
 }
 
@@ -787,7 +866,8 @@ function render() {
   const el = document.getElementById('taskList');
   el.innerHTML = '';
   if (view === 'archive') { renderArchive(el); return; }
-  const list = sorted(filtered());
+  const baseList = filtered().map(t=>({kind:'task', ...t}));
+  const list = sorted(view==='today' ? [...baseList, ...todaySubtaskItems()] : baseList);
   if (!list.length) {
     const icons = {today:'☀️',week:'📅',month:'🗓️',year:'🎯',nodeadline:'∞'};
     const heads = {today:'All clear for today',week:'Nothing due this week',month:'Nothing due this month',year:'Nothing due this year',nodeadline:'No open-ended tasks'};
@@ -796,11 +876,15 @@ function render() {
   }
   if (sect === 'all') {
     const work = list.filter(t=>t.section==='work'), life = list.filter(t=>t.section==='life');
-    if (work.length) { const l=document.createElement('div'); l.className='sect-label'; l.textContent='💼 Work'; el.appendChild(l); work.forEach(t=>el.appendChild(makeCard(t))); }
-    if (life.length) { const l=document.createElement('div'); l.className='sect-label'; l.textContent='🏠 Life'; el.appendChild(l); life.forEach(t=>el.appendChild(makeCard(t))); }
+    if (work.length) { const l=document.createElement('div'); l.className='sect-label'; l.textContent='💼 Work'; el.appendChild(l); work.forEach(t=>el.appendChild(renderItemCard(t))); }
+    if (life.length) { const l=document.createElement('div'); l.className='sect-label'; l.textContent='🏠 Life'; el.appendChild(l); life.forEach(t=>el.appendChild(renderItemCard(t))); }
   } else {
-    list.forEach(t=>el.appendChild(makeCard(t)));
+    list.forEach(t=>el.appendChild(renderItemCard(t)));
   }
+}
+
+function renderItemCard(item) {
+  return item.kind === 'subtask' ? makeSubtaskCard(item) : makeCard(item);
 }
 
 function makeCard(task) {
@@ -858,8 +942,41 @@ function makeCard(task) {
   return div;
 }
 
+function makeSubtaskCard(item) {
+  const over = isOverdue(item), tod = isDueToday(item);
+  const dl = dueLbl(item.dueDate, item.dueTime);
+  const div = document.createElement('div');
+  div.className = `card${over?' overdue':tod?' due-today':''}`;
+  div.innerHTML = `
+    <button class="check-btn ${item.section}" data-scid="${item.taskId}:${item.subId}" title="Mark subtask complete">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0;transition:opacity .1s"><polyline points="20 6 9 17 4 12"/></svg>
+    </button>
+    <div class="card-body">
+      <div class="card-title-row">
+        <div class="card-title">${esc(item.title)}</div>
+      </div>
+      <div class="card-meta">
+        ${over   ? '<span class="badge b-overdue">Overdue</span>' : ''}
+        ${tod    ? '<span class="badge b-today">Today</span>'    : ''}
+        ${dl     ? `<span class="due-text${over?' overdue':tod?' today':''}">${dl}</span>` : ''}
+        <span class="badge b-rec">Subtask</span>
+      </div>
+      <div class="card-notes">Inside ${esc(item.parentTitle)}</div>
+    </div>
+    <div class="card-actions">
+      <button class="icon-btn" data-seid="${item.taskId}:${item.subId}" title="Edit subtask">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      </button>
+    </div>`;
+  const svg = div.querySelector('.check-btn svg');
+  const cb  = div.querySelector('.check-btn');
+  cb.addEventListener('pointerenter', () => svg.style.opacity='0.6');
+  cb.addEventListener('pointerleave', () => svg.style.opacity='0');
+  return div;
+}
+
 function renderSubtaskArea(task) {
-  const subs = task.subtasks || [];
+  const subs = sortedSubtasks(task);
   const items = subs.map(s => `
     <div class="subtask-item">
       <button type="button" class="st-check${s.done?' done':''}" data-stc="${task.id}:${s.id}">
@@ -869,12 +986,24 @@ function renderSubtaskArea(task) {
         <div class="st-label${s.done?' done':''}">${esc(s.title)}</div>
         ${(s.dayOfMonth || s.bizDayN) ? `<div class="st-meta">${esc(subtaskScheduleMeta(s, task))}</div>` : ''}
       </div>
-      <button type="button" class="st-del" data-std="${task.id}:${s.id}">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
+      <div class="st-tools">
+        <button type="button" class="st-edit" data-ste="${task.id}:${s.id}" title="Edit subtask">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <button type="button" class="st-del" data-std="${task.id}:${s.id}">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
     </div>`).join('');
 
   return `<div class="subtask-area">
+    <div class="subtask-topbar">
+      <label class="fl" style="margin:0">Subtasks</label>
+      <select data-ssort="${task.id}">
+        <option value="due"${(task.subtaskSort||'due')==='due'?' selected':''}>Sort by due date</option>
+        <option value="alpha"${task.subtaskSort==='alpha'?' selected':''}>Sort A-Z</option>
+      </select>
+    </div>
     ${items}
     <div class="st-add-row">
       <input class="st-add-input" type="text" placeholder="Add subtask…" data-sadd="${task.id}" autocomplete="off">
@@ -913,6 +1042,22 @@ function wireSubtaskArea(cardEl, task) {
   cardEl.querySelectorAll('[data-std]').forEach(btn => {
     btn.addEventListener('click', e => { e.stopPropagation(); const [tid,sid] = btn.dataset.std.split(':'); deleteSubtask(tid,sid); });
   });
+  cardEl.querySelectorAll('[data-ste]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const [tid,sid] = btn.dataset.ste.split(':');
+      openEdit(tid);
+      beginModalSubEdit(sid);
+    });
+  });
+  const sortSel = cardEl.querySelector('[data-ssort]');
+  if (sortSel) {
+    sortSel.addEventListener('click', e => e.stopPropagation());
+    sortSel.addEventListener('change', e => {
+      e.stopPropagation();
+      setSubtaskSort(task.id, e.target.value);
+    });
+  }
   // Add subtask via button
   const addBtn = cardEl.querySelector('[data-saddbtn]');
   const addInput = cardEl.querySelector('[data-sadd]');
@@ -960,12 +1105,35 @@ function addSubtask(taskId, title, dayOfMonth='', bizDayN='') {
   save(); render();
 }
 
+function setSubtaskSort(taskId, value) {
+  const task = tasks.find(t=>t.id===taskId);
+  if (!task) return;
+  task.subtaskSort = value === 'alpha' ? 'alpha' : 'due';
+  save(); render();
+}
+
 function toggleSubtask(taskId, subId) {
   const task = tasks.find(t=>t.id===taskId);
   if (!task||!task.subtasks) return;
   const sub = task.subtasks.find(s=>s.id===subId);
   if (!sub) return;
   sub.done = !sub.done;
+  if (sub.done) {
+    archive.unshift({
+      id:uid(),
+      taskId:task.id,
+      subId:sub.id,
+      title:sub.title,
+      parentTitle:task.title,
+      section:task.section,
+      dueDate:subtaskDueDate(task, sub),
+      dueTime:null,
+      notes:'',
+      completedAt:new Date().toISOString(),
+      type:'subtask'
+    });
+    saveArchive();
+  }
   save(); render();
 }
 
@@ -980,6 +1148,8 @@ function deleteSubtask(taskId, subId) {
 document.getElementById('taskList').addEventListener('click', e => {
   // Stop if clicking inside subtask area inputs
   if (e.target.closest('.subtask-area')) return;
+  const scid = e.target.closest('[data-scid]'); if (scid) { const [tid,sid] = scid.dataset.scid.split(':'); toggleSubtask(tid, sid); return; }
+  const seid = e.target.closest('[data-seid]'); if (seid) { const [tid,sid] = seid.dataset.seid.split(':'); openEdit(tid); beginModalSubEdit(sid); return; }
   const cid = e.target.closest('[data-cid]'); if (cid) { completeTask(cid.dataset.cid); return; }
   const eid = e.target.closest('[data-eid]'); if (eid) { openEdit(eid.dataset.eid); return; }
   const did = e.target.closest('[data-did]'); if (did) { deleteTask(did.dataset.did); return; }
@@ -995,7 +1165,17 @@ function completeTask(id) {
   const idx = tasks.findIndex(t=>t.id===id);
   if (idx===-1) return;
   const task = tasks[idx];
-  archive.unshift({ id:uid(), taskId:task.id, title:task.title, section:task.section, dueDate:task.dueDate||null, dueTime:task.dueTime||null, notes:task.notes||'', completedAt:new Date().toISOString() });
+  archive.unshift({
+    id:uid(),
+    taskId:task.id,
+    title:task.title,
+    section:task.section,
+    dueDate:task.dueDate||null,
+    dueTime:task.dueTime||null,
+    notes:task.notes||'',
+    completedAt:new Date().toISOString(),
+    type:'task'
+  });
   saveArchive();
   const isRec = task.recurrence && task.recurrence.type !== 'none';
   if (isRec) {
@@ -1017,7 +1197,7 @@ function deleteTask(id) {
 
 // ── Modal ──────────────────────────────────────────────
 function openAdd() {
-  editId = null; modalSubs = [];
+  editId = null; modalSubs = []; modalSubEditId = null;
   document.getElementById('modalTitle').textContent = 'New Task';
   document.getElementById('taskForm').reset();
   document.getElementById('fRec').value = 'none';
@@ -1029,6 +1209,7 @@ function openAdd() {
   document.getElementById('modalStDay').value = '';
   document.getElementById('modalStBiz').value = '';
   renderModalSubs();
+  resetModalSubEdit();
   document.getElementById('overlay').classList.remove('hidden');
   setTimeout(()=>document.getElementById('fTitle').focus(), 80);
 }
@@ -1047,19 +1228,21 @@ function openEdit(id) {
   document.getElementById('fRec').value = rec.type;
   document.getElementById('fMonthlyMode').value = rec.monthlyMode || (rec.type==='bizday' ? 'bizday' : 'date');
   syncRecUI();
+  modalSubEditId = null;
   document.querySelectorAll('.dchip').forEach(b=>b.classList.toggle('sel', rec.type==='weekly'&&(rec.daysOfWeek||[]).includes(+b.dataset.d)));
   document.querySelectorAll('.dom-btn').forEach(b=>b.classList.toggle('sel', rec.type==='monthly' && (rec.monthlyMode||'date')==='date' && (rec.daysOfMonth||[]).includes(+b.dataset.day)));
   if (rec.type==='bizday' || (rec.type==='monthly' && rec.monthlyMode==='bizday')) document.getElementById('fBizday').value = rec.bizDayN||1;
   document.getElementById('modalStDay').value = '';
   document.getElementById('modalStBiz').value = '';
   renderModalSubs();
+  resetModalSubEdit();
   document.getElementById('deleteRow').style.display = 'block';
   document.getElementById('overlay').classList.remove('hidden');
 }
 
 function closeModal() {
   document.getElementById('overlay').classList.add('hidden');
-  editId = null; modalSubs = [];
+  editId = null; modalSubs = []; modalSubEditId = null;
 }
 
 function pickSect(s) {
@@ -1084,6 +1267,25 @@ function syncRecUI() {
 }
 
 // Modal subtasks
+function resetModalSubEdit() {
+  modalSubEditId = null;
+  document.getElementById('modalStInput').value = '';
+  document.getElementById('modalStDay').value = '';
+  document.getElementById('modalStBiz').value = '';
+  document.getElementById('modalStAddBtn').textContent = 'Add';
+}
+
+function beginModalSubEdit(subId) {
+  const sub = modalSubs.find(s=>s.id===subId);
+  if (!sub) return;
+  modalSubEditId = subId;
+  document.getElementById('modalStInput').value = sub.title || '';
+  document.getElementById('modalStDay').value = sub.dayOfMonth || '';
+  document.getElementById('modalStBiz').value = sub.dayOfMonth ? '' : (sub.bizDayN || '');
+  document.getElementById('modalStAddBtn').textContent = 'Save';
+  document.getElementById('modalStInput').focus();
+}
+
 function renderModalSubs() {
   const list = document.getElementById('modalStList');
   list.innerHTML = modalSubs.map(s=>`
@@ -1092,12 +1294,22 @@ function renderModalSubs() {
         <div class="modal-st-title">${esc(s.title)}</div>
         ${s.dayOfMonth ? `<div class="modal-st-meta">Day ${s.dayOfMonth} of month</div>` : s.bizDayN ? `<div class="modal-st-meta">${ordinal(s.bizDayN)} business day</div>` : ''}
       </div>
+      <button type="button" class="modal-st-edit" data-mste="${s.id}">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      </button>
       <button type="button" class="modal-st-del" data-mstd="${s.id}">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>`).join('');
+  list.querySelectorAll('[data-mste]').forEach(btn=>{
+    btn.addEventListener('click', ()=>beginModalSubEdit(btn.dataset.mste));
+  });
   list.querySelectorAll('[data-mstd]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ modalSubs = modalSubs.filter(s=>s.id!==btn.dataset.mstd); renderModalSubs(); });
+    btn.addEventListener('click', ()=>{
+      if (modalSubEditId === btn.dataset.mstd) resetModalSubEdit();
+      modalSubs = modalSubs.filter(s=>s.id!==btn.dataset.mstd);
+      renderModalSubs();
+    });
   });
 }
 
@@ -1107,16 +1319,19 @@ document.getElementById('modalStAddBtn').addEventListener('click', () => {
   const biz = document.getElementById('modalStBiz');
   const title = inp.value.trim(); if (!title) return;
   const dayNum = day.value ? +day.value : null;
-  modalSubs.push({
-    id:uid(),
+  const nextSub = {
+    id: modalSubEditId || uid(),
     title,
-    done:false,
+    done: modalSubEditId ? (modalSubs.find(s=>s.id===modalSubEditId)?.done || false) : false,
     dayOfMonth: dayNum,
     bizDayN: dayNum ? null : (biz.value ? +biz.value : null)
-  });
-  inp.value = '';
-  day.value = '';
-  biz.value = '';
+  };
+  if (modalSubEditId) {
+    modalSubs = modalSubs.map(s => s.id===modalSubEditId ? nextSub : s);
+  } else {
+    modalSubs.push(nextSub);
+  }
+  resetModalSubEdit();
   renderModalSubs();
   inp.focus();
 });
@@ -1239,6 +1454,43 @@ initNotifBanner();
 render();
 checkNotifs();
 setInterval(checkNotifs, 60000);
+
+renderArchive = function(el) {
+  let entries = sect==='all' ? archive : archive.filter(e=>e.section===sect);
+  if (!entries.length) {
+    el.innerHTML=`<div class="empty"><div class="empty-icon">📦</div><div class="empty-head">Archive is empty</div><div class="empty-sub">Completed tasks show up here</div></div>`;
+    return;
+  }
+  const hdr=document.createElement('div');
+  hdr.className='arc-header';
+  hdr.innerHTML=`<div class="sect-label">${entries.length} completed instance${entries.length!==1?'s':''}</div><button class="arc-clear" id="arcClear">Clear all</button>`;
+  el.appendChild(hdr);
+  const groups = new Map();
+  entries.forEach(e => {
+    const key = new Date(e.completedAt).toLocaleDateString('en-US', {month:'long', year:'numeric'});
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(e);
+  });
+  groups.forEach((group, label) => {
+    const labelEl=document.createElement('div');
+    labelEl.className='sect-label';
+    labelEl.textContent=label;
+    el.appendChild(labelEl);
+    group.forEach(e => {
+      const d=document.createElement('div');
+      d.className='arc-card';
+      const when=new Date(e.completedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
+      const parent = e.type==='subtask' && e.parentTitle ? `<span>From ${esc(e.parentTitle)}</span>` : '';
+      d.innerHTML=`<div class="arc-title">${esc(e.title)}</div><div class="arc-meta"><span class="badge ${e.section==='work'?'b-work':'b-life'}">${e.section==='work'?'💼 Work':'🏠 Life'}</span><span>Completed ${when}</span>${parent}${e.dueDate?`<span>Was due ${dueLbl(e.dueDate,null)}</span>`:''}</div>`;
+      el.appendChild(d);
+    });
+  });
+  document.getElementById('arcClear').addEventListener('click', ()=>{
+    if(!confirm('Clear all archive entries?')) return;
+    if(sect==='all') archive=[]; else archive=archive.filter(e=>e.section!==sect);
+    saveArchive(); render();
+  });
+};
 </script>
 </body>
 </html>
