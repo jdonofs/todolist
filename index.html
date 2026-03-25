@@ -47,6 +47,10 @@
     .bizday-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .bizday-row select { width: auto; flex-shrink: 0; }
     .bizday-note { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
+    .st-bizlabel { font-size: 11px; font-weight: 600; color: var(--accent); background: rgba(59,130,246,0.1); padding: 1px 6px; border-radius: 999px; flex-shrink: 0; }
+    .st-bizlabel.overdue { color: var(--danger); background: rgba(239,68,68,0.1); }
+    .st-add-biz { width: auto; font-size: 12px; padding: 7px 8px; flex-shrink: 0; background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: var(--rsm); outline: none; -webkit-appearance: none; appearance: none; }
+    .modal-st-bizlabel { font-size: 11px; font-weight: 600; color: var(--accent); background: rgba(59,130,246,0.1); padding: 2px 7px; border-radius: 999px; margin-right: 4px; }
     .section-tabs { display: flex; gap: 2px; background: var(--surface); padding: 3px; border-radius: 999px; border: 1px solid var(--border); }
     .stab { padding: 5px 14px; border-radius: 999px; border: none; background: none; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
     .stab.active { background: var(--surface2); color: var(--text); }
@@ -101,11 +105,13 @@
 
     /* ── Subtask area ── */
     .subtask-area { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
-    .subtask-item { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+    .subtask-item { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0; }
     .st-check { flex-shrink: 0; width: 17px; height: 17px; border-radius: 4px; border: 1.5px solid var(--border); background: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.12s; color: transparent; }
     .st-check.done { background: var(--success); border-color: var(--success); color: #fff; }
-    .st-label { flex: 1; font-size: 13px; color: var(--text); cursor: pointer; }
+    .st-copy { flex: 1; min-width: 0; }
+    .st-label { font-size: 13px; color: var(--text); cursor: pointer; }
     .st-label.done { text-decoration: line-through; color: var(--muted); }
+    .st-meta { margin-top: 3px; font-size: 11px; color: var(--muted); }
     .st-del { width: 22px; height: 22px; border: none; background: none; color: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.12s; flex-shrink: 0; }
     .subtask-item:hover .st-del { color: var(--muted); }
     .st-del:hover { background: rgba(239,68,68,0.1); color: var(--danger) !important; }
@@ -174,7 +180,9 @@
     .modal-st-list { margin-bottom: 8px; }
     .modal-st-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
     .modal-st-item:last-child { border-bottom: none; }
-    .modal-st-title { flex: 1; font-size: 14px; }
+    .modal-st-copy { flex: 1; min-width: 0; }
+    .modal-st-title { font-size: 14px; }
+    .modal-st-meta { margin-top: 3px; font-size: 11px; color: var(--muted); }
     .modal-st-del { width: 24px; height: 24px; border: none; background: none; color: var(--muted); cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px; }
     .modal-st-del:hover { background: rgba(239,68,68,0.1); color: var(--danger); }
     .modal-st-add { display: flex; gap: 8px; margin-top: 6px; }
@@ -194,7 +202,7 @@
 
 <header class="header">
   <div class="header-row1">
-    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.3</span></div>
+    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.4</span></div>
     <div class="section-tabs">
       <button class="stab active" data-s="all">All</button>
       <button class="stab" data-s="work">Work</button>
@@ -270,6 +278,7 @@
       <div class="fg hidden" id="monthlyRow">
         <label class="fl">Day(s) of the month</label>
         <div class="dom-grid" id="domGrid"></div>
+        <div class="bizday-note">Optional. Leave this blank to repeat monthly using the task's current due date.</div>
       </div>
       <div class="fg hidden" id="bizdayRow">
         <label class="fl">Business day of the month</label>
@@ -305,6 +314,13 @@
         <div class="modal-st-list" id="modalStList"></div>
         <div class="modal-st-add">
           <input type="text" id="modalStInput" placeholder="Add a subtask…" autocomplete="off">
+          <select id="modalStBiz" class="st-add-biz" title="Optional: due on Nth business day of month">
+            <option value="">No biz day</option>
+            <option value="1">1st biz</option><option value="2">2nd biz</option><option value="3">3rd biz</option>
+            <option value="4">4th biz</option><option value="5">5th biz</option><option value="6">6th biz</option>
+            <option value="7">7th biz</option><option value="8">8th biz</option><option value="9">9th biz</option>
+            <option value="10">10th biz</option><option value="15">15th biz</option><option value="20">20th biz</option>
+          </select>
           <button type="button" class="btn btn-secondary" id="modalStAddBtn" style="padding:10px 14px;margin-top:0">Add</button>
         </div>
       </div>
@@ -339,6 +355,15 @@ const ARCHIVE_KEY = 'tadoo_archive';
 function loadData() {
   try { tasks   = JSON.parse(localStorage.getItem(TASKS_KEY)   || '[]'); } catch { tasks   = []; }
   try { archive = JSON.parse(localStorage.getItem(ARCHIVE_KEY) || '[]'); } catch { archive = []; }
+  tasks = tasks.map(t => ({
+    ...t,
+    subtasks: (t.subtasks || []).map(s => ({
+      id: s.id || uid(),
+      title: s.title || '',
+      done: !!s.done,
+      bizDayN: s.bizDayN ? +s.bizDayN : null
+    }))
+  }));
 }
 function save()        { localStorage.setItem(TASKS_KEY,   JSON.stringify(tasks));   }
 function saveArchive() { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archive)); }
@@ -360,6 +385,23 @@ function parseDate(s) {
 
 function ymd(d) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function ordinal(n) {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  if (n % 10 === 1) return `${n}st`;
+  if (n % 10 === 2) return `${n}nd`;
+  if (n % 10 === 3) return `${n}rd`;
+  return `${n}th`;
+}
+
+function addMonthsClamped(date, months) {
+  const day = date.getDate();
+  const d = new Date(date.getFullYear(), date.getMonth() + months, 1);
+  const maxDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, maxDay));
+  return d;
 }
 
 function today() { const d = new Date(); d.setHours(0,0,0,0); return d; }
@@ -492,6 +534,35 @@ function nthBusinessDay(year, month, n) {
 }
 
 // ── Recurrence ─────────────────────────────────────────
+function recLabel(rec) {
+  if (!rec || rec.type === 'none') return null;
+  if (rec.type === 'daily') return 'â†º Daily';
+  if (rec.type === 'yearly') return 'â†º Yearly';
+  if (rec.type === 'weekly') {
+    const dn = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+    return 'â†º ' + ((rec.daysOfWeek||[]).map(d=>dn[d]).join(' ') || 'Weekly');
+  }
+  if (rec.type === 'monthly') {
+    const days = (rec.daysOfMonth||[]).slice().sort((a,b)=>a-b);
+    return 'â†º ' + (days.join(', ') || 'Monthly');
+  }
+  if (rec.type === 'bizday') {
+    return `â†º ${ordinal(rec.bizDayN||1)} biz day`;
+  }
+  return null;
+}
+
+function subtaskBizMeta(subtask, task) {
+  if (!subtask.bizDayN) return null;
+  const parts = [`${ordinal(subtask.bizDayN)} business day`];
+  if (task.dueDate) {
+    const base = parseDate(task.dueDate);
+    const actual = nthBusinessDay(base.getFullYear(), base.getMonth(), subtask.bizDayN);
+    if (actual) parts.push(actual.toLocaleDateString('en-US', {month:'short', day:'numeric'}));
+  }
+  return parts.join(' Â· ');
+}
+
 function nextOccurrence(task) {
   const rec = task.recurrence;
   if (!rec || rec.type === 'none') return null;
@@ -505,7 +576,12 @@ function nextOccurrence(task) {
   }
   if (rec.type === 'monthly') {
     const days = (rec.daysOfMonth||[]).slice().sort((a,b)=>a-b);
-    if (!days.length) return null;
+    if (!days.length) {
+      const base = task.dueDate ? parseDate(task.dueDate) : from;
+      let next = addMonthsClamped(base, 1);
+      while (next <= from) next = addMonthsClamped(next, 1);
+      return ymd(next);
+    }
     for (let mo = 0; mo < 13; mo++) {
       const rawMo = from.getMonth() + mo, yr = from.getFullYear() + Math.floor(rawMo/12), month = rawMo%12;
       const maxDay = new Date(yr, month+1, 0).getDate();
@@ -584,7 +660,7 @@ function render() {
 
 function makeCard(task) {
   const over = isOverdue(task), tod = isDueToday(task);
-  const rl = recLbl(task.recurrence), dl = dueLbl(task.dueDate, task.dueTime);
+  const rl = recLabel(task.recurrence), dl = dueLbl(task.dueDate, task.dueTime);
   const subs = task.subtasks || [];
   const subDone = subs.filter(s=>s.done).length;
   const hasSubs = subs.length > 0;
@@ -644,7 +720,10 @@ function renderSubtaskArea(task) {
       <button type="button" class="st-check${s.done?' done':''}" data-stc="${task.id}:${s.id}">
         ${s.done ? `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>` : ''}
       </button>
-      <span class="st-label${s.done?' done':''}">${esc(s.title)}</span>
+      <div class="st-copy">
+        <div class="st-label${s.done?' done':''}">${esc(s.title)}</div>
+        ${s.bizDayN ? `<div class="st-meta">${esc(subtaskBizMeta(s, task))}</div>` : ''}
+      </div>
       <button type="button" class="st-del" data-std="${task.id}:${s.id}">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -654,6 +733,13 @@ function renderSubtaskArea(task) {
     ${items}
     <div class="st-add-row">
       <input class="st-add-input" type="text" placeholder="Add subtask…" data-sadd="${task.id}" autocomplete="off">
+      <select class="st-add-biz" data-saddbiz="${task.id}" title="Optional: due on Nth business day of month">
+        <option value="">No biz day</option>
+        <option value="1">1st biz</option><option value="2">2nd biz</option><option value="3">3rd biz</option>
+        <option value="4">4th biz</option><option value="5">5th biz</option><option value="6">6th biz</option>
+        <option value="7">7th biz</option><option value="8">8th biz</option><option value="9">9th biz</option>
+        <option value="10">10th biz</option><option value="15">15th biz</option><option value="20">20th biz</option>
+      </select>
       <button type="button" class="st-add-btn" data-saddbtn="${task.id}">Add</button>
     </div>
   </div>`;
@@ -671,21 +757,30 @@ function wireSubtaskArea(cardEl, task) {
   // Add subtask via button
   const addBtn = cardEl.querySelector('[data-saddbtn]');
   const addInput = cardEl.querySelector('[data-sadd]');
+  const addBiz = cardEl.querySelector('[data-saddbiz]');
   if (addBtn && addInput) {
-    addBtn.addEventListener('click', e => { e.stopPropagation(); addSubtask(task.id, addInput.value); addInput.value=''; addInput.focus(); });
-    addInput.addEventListener('keydown', e => { if (e.key==='Enter') { e.preventDefault(); e.stopPropagation(); addSubtask(task.id, addInput.value); addInput.value=''; } });
+    const submit = e => {
+      e.stopPropagation();
+      addSubtask(task.id, addInput.value, addBiz?.value);
+      addInput.value = '';
+      if (addBiz) addBiz.value = '';
+      addInput.focus();
+    };
+    addBtn.addEventListener('click', submit);
+    addInput.addEventListener('keydown', e => { if (e.key==='Enter') { e.preventDefault(); submit(e); } });
     addInput.addEventListener('click', e => e.stopPropagation());
+    if (addBiz) addBiz.addEventListener('click', e => e.stopPropagation());
   }
 }
 
 // ── Subtask operations ─────────────────────────────────
-function addSubtask(taskId, title) {
+function addSubtask(taskId, title, bizDayN='') {
   title = (title||'').trim();
   if (!title) return;
   const idx = tasks.findIndex(t=>t.id===taskId);
   if (idx===-1) return;
   if (!tasks[idx].subtasks) tasks[idx].subtasks = [];
-  tasks[idx].subtasks.push({ id:uid(), title, done:false });
+  tasks[idx].subtasks.push({ id:uid(), title, done:false, bizDayN: bizDayN ? +bizDayN : null });
   save(); render();
 }
 
@@ -754,6 +849,7 @@ function openAdd() {
   pickSect(sect!=='all' ? sect : 'work');
   document.getElementById('deleteRow').style.display = 'none';
   document.querySelectorAll('.dchip, .dom-btn').forEach(b=>b.classList.remove('sel'));
+  document.getElementById('modalStBiz').value = '';
   renderModalSubs();
   document.getElementById('overlay').classList.remove('hidden');
   setTimeout(()=>document.getElementById('fTitle').focus(), 80);
@@ -774,6 +870,7 @@ function openEdit(id) {
   document.querySelectorAll('.dchip').forEach(b=>b.classList.toggle('sel', rec.type==='weekly'&&(rec.daysOfWeek||[]).includes(+b.dataset.d)));
   document.querySelectorAll('.dom-btn').forEach(b=>b.classList.toggle('sel', rec.type==='monthly'&&(rec.daysOfMonth||[]).includes(+b.dataset.day)));
   if (rec.type==='bizday') document.getElementById('fBizday').value = rec.bizDayN||1;
+  document.getElementById('modalStBiz').value = '';
   renderModalSubs();
   document.getElementById('deleteRow').style.display = 'block';
   document.getElementById('overlay').classList.remove('hidden');
@@ -801,7 +898,10 @@ function renderModalSubs() {
   const list = document.getElementById('modalStList');
   list.innerHTML = modalSubs.map(s=>`
     <div class="modal-st-item">
-      <span class="modal-st-title">${esc(s.title)}</span>
+      <div class="modal-st-copy">
+        <div class="modal-st-title">${esc(s.title)}</div>
+        ${s.bizDayN ? `<div class="modal-st-meta">${ordinal(s.bizDayN)} business day</div>` : ''}
+      </div>
       <button type="button" class="modal-st-del" data-mstd="${s.id}">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -813,9 +913,13 @@ function renderModalSubs() {
 
 document.getElementById('modalStAddBtn').addEventListener('click', () => {
   const inp = document.getElementById('modalStInput');
+  const biz = document.getElementById('modalStBiz');
   const title = inp.value.trim(); if (!title) return;
-  modalSubs.push({id:uid(), title, done:false});
-  inp.value = ''; renderModalSubs(); inp.focus();
+  modalSubs.push({id:uid(), title, done:false, bizDayN: biz.value ? +biz.value : null});
+  inp.value = '';
+  biz.value = '';
+  renderModalSubs();
+  inp.focus();
 });
 
 document.getElementById('modalStInput').addEventListener('keydown', e=>{
