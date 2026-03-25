@@ -200,19 +200,25 @@
 
     /* ── Archive ── */
     .arc-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 11px 14px; margin-bottom: 6px; opacity: 0.65; }
+    .arc-card.clickable { cursor: pointer; opacity: 0.9; }
+    .arc-card.clickable:hover { border-color: var(--accent); }
     .arc-title { font-size: 14px; font-weight: 500; text-decoration: line-through; color: var(--muted); }
     .arc-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 5px; font-size: 12px; color: var(--muted); }
     .arc-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 4px 8px; }
     .arc-header .sect-label { padding: 0; }
     .arc-clear { font-size: 12px; color: var(--danger); background: none; border: none; cursor: pointer; opacity: 0.7; }
     .arc-clear:hover { opacity: 1; }
+    .arc-back { border: none; background: none; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; padding: 0; }
+    .arc-sublist { display: grid; gap: 8px; }
+    .arc-subitem { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 10px 12px; }
+    .arc-subtitle { font-size: 14px; color: var(--text); }
   </style>
 </head>
 <body>
 
 <header class="header">
   <div class="header-row1">
-    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.9</span></div>
+    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.10</span></div>
     <div class="section-tabs">
       <button class="stab active" data-s="all">All</button>
       <button class="stab" data-s="work">Work</button>
@@ -376,6 +382,7 @@ let modalSubs = [];         // subtasks being edited in modal
 let modalSubEditId = null;
 let saveTimer = null;
 let archiveSaveTimer = null;
+let archiveDetailId = null;
 
 const TASKS_KEY   = 'tadoo_tasks';
 const ARCHIVE_KEY = 'tadoo_archive';
@@ -688,7 +695,7 @@ function recText(rec) {
 }
 
 function subtaskScheduleMeta(subtask, task) {
-  if (subtask.dayOfMonth) return `Day ${subtask.dayOfMonth} of month`;
+  if (subtask.dayOfMonth) return `${ordinal(subtask.dayOfMonth)} of the month`;
   if (!subtask.bizDayN) return null;
   const parts = [`${ordinal(subtask.bizDayN)} business day`];
   if (task.dueDate) {
@@ -1206,6 +1213,7 @@ function completeTask(id) {
     dueDate:task.dueDate||null,
     dueTime:task.dueTime||null,
     notes:task.notes||'',
+    archivedSubtasks: JSON.parse(JSON.stringify(task.subtasks||[])),
     completedAt:new Date().toISOString(),
     type:'task'
   });
@@ -1325,7 +1333,7 @@ function renderModalSubs() {
     <div class="modal-st-item">
       <div class="modal-st-copy">
         <div class="modal-st-title">${esc(s.title)}</div>
-        ${s.dayOfMonth ? `<div class="modal-st-meta">Day ${s.dayOfMonth} of month</div>` : s.bizDayN ? `<div class="modal-st-meta">${ordinal(s.bizDayN)} business day</div>` : ''}
+        ${s.dayOfMonth ? `<div class="modal-st-meta">${ordinal(s.dayOfMonth)} of the month</div>` : s.bizDayN ? `<div class="modal-st-meta">${ordinal(s.bizDayN)} business day</div>` : ''}
       </div>
       <button type="button" class="modal-st-edit" data-mste="${s.id}">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -1412,10 +1420,10 @@ document.getElementById('deleteBtn').addEventListener('click', ()=>{
 
 // ── Tabs ───────────────────────────────────────────────
 document.querySelectorAll('.stab').forEach(b=>b.addEventListener('click', ()=>{
-  sect=b.dataset.s; document.querySelectorAll('.stab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); render();
+  sect=b.dataset.s; archiveDetailId = null; document.querySelectorAll('.stab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); render();
 }));
 document.querySelectorAll('.vtab').forEach(b=>b.addEventListener('click', ()=>{
-  view=b.dataset.v; document.querySelectorAll('.vtab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); render();
+  view=b.dataset.v; archiveDetailId = null; document.querySelectorAll('.vtab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); render();
 }));
 document.querySelectorAll('.sp-opt').forEach(b=>b.addEventListener('click', ()=>pickSect(b.dataset.v)));
 document.getElementById('fRec').addEventListener('change', syncRecUI);
@@ -1491,17 +1499,56 @@ window.addEventListener('beforeunload', flushPendingSaves);
 document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState === 'hidden') flushPendingSaves(); });
 
 renderArchive = function(el) {
-  let entries = sect==='all' ? archive : archive.filter(e=>e.section===sect);
-  if (!entries.length) {
+  const taskEntries = (sect==='all' ? archive : archive.filter(e=>e.section===sect)).filter(e => e.type !== 'subtask');
+  if (archiveDetailId) {
+    const entry = taskEntries.find(e => e.id === archiveDetailId);
+    if (!entry) archiveDetailId = null;
+    else {
+      const hdr=document.createElement('div');
+      hdr.className='arc-header';
+      hdr.innerHTML=`<button class="arc-back" id="arcBackBtn">Back</button><div class="sect-label">Archived Task</div>`;
+      el.appendChild(hdr);
+      const when=new Date(entry.completedAt).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
+      const card=document.createElement('div');
+      card.className='arc-card';
+      card.innerHTML=`<div class="arc-title">${esc(entry.title)}</div><div class="arc-meta"><span class="badge ${entry.section==='work'?'b-work':'b-life'}">${entry.section==='work'?'💼 Work':'🏠 Life'}</span><span>Completed ${when}</span>${entry.dueDate?`<span>Was due ${dueLbl(entry.dueDate,null)}</span>`:''}</div>`;
+      el.appendChild(card);
+      const subLabel=document.createElement('div');
+      subLabel.className='sect-label';
+      subLabel.textContent='Subtasks';
+      el.appendChild(subLabel);
+      const wrap=document.createElement('div');
+      wrap.className='arc-sublist';
+      const subs = entry.archivedSubtasks || [];
+      if (!subs.length) {
+        wrap.innerHTML = `<div class="empty"><div class="empty-head">No subtasks saved</div><div class="empty-sub">This archived task did not include subtasks.</div></div>`;
+      } else {
+        subs.forEach(s => {
+          const item=document.createElement('div');
+          item.className='arc-subitem';
+          const meta = s.dayOfMonth ? `${ordinal(s.dayOfMonth)} of the month` : s.bizDayN ? `${ordinal(s.bizDayN)} business day` : 'No subtask date';
+          item.innerHTML = `<div class="arc-subtitle">${esc(s.title)}</div><div class="arc-meta"><span>${meta}</span>${s.done?'<span>Completed</span>':''}</div>`;
+          wrap.appendChild(item);
+        });
+      }
+      el.appendChild(wrap);
+      document.getElementById('arcBackBtn').addEventListener('click', ()=>{
+        archiveDetailId = null;
+        render();
+      });
+      return;
+    }
+  }
+  if (!taskEntries.length) {
     el.innerHTML=`<div class="empty"><div class="empty-icon">📦</div><div class="empty-head">Archive is empty</div><div class="empty-sub">Completed tasks show up here</div></div>`;
     return;
   }
   const hdr=document.createElement('div');
   hdr.className='arc-header';
-  hdr.innerHTML=`<div class="sect-label">${entries.length} completed instance${entries.length!==1?'s':''}</div><button class="arc-clear" id="arcClear">Clear all</button>`;
+  hdr.innerHTML=`<div class="sect-label">${taskEntries.length} completed task${taskEntries.length!==1?'s':''}</div><button class="arc-clear" id="arcClear">Clear all</button>`;
   el.appendChild(hdr);
   const groups = new Map();
-  entries.forEach(e => {
+  taskEntries.forEach(e => {
     const key = new Date(e.completedAt).toLocaleDateString('en-US', {month:'long', year:'numeric'});
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(e);
@@ -1512,17 +1559,23 @@ renderArchive = function(el) {
     labelEl.textContent=label;
     el.appendChild(labelEl);
     group.forEach(e => {
-      const d=document.createElement('div');
-      d.className='arc-card';
+      const d=document.createElement('button');
+      d.type='button';
+      d.className='arc-card clickable';
+      d.dataset.arcid = e.id;
       const when=new Date(e.completedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
-      const parent = e.type==='subtask' && e.parentTitle ? `<span>From ${esc(e.parentTitle)}</span>` : '';
-      d.innerHTML=`<div class="arc-title">${esc(e.title)}</div><div class="arc-meta"><span class="badge ${e.section==='work'?'b-work':'b-life'}">${e.section==='work'?'💼 Work':'🏠 Life'}</span><span>Completed ${when}</span>${parent}${e.dueDate?`<span>Was due ${dueLbl(e.dueDate,null)}</span>`:''}</div>`;
+      d.innerHTML=`<div class="arc-title">${esc(e.title)}</div><div class="arc-meta"><span class="badge ${e.section==='work'?'b-work':'b-life'}">${e.section==='work'?'💼 Work':'🏠 Life'}</span><span>Completed ${when}</span>${e.dueDate?`<span>Was due ${dueLbl(e.dueDate,null)}</span>`:''}</div>`;
+      d.addEventListener('click', ()=>{
+        archiveDetailId = e.id;
+        render();
+      });
       el.appendChild(d);
     });
   });
   document.getElementById('arcClear').addEventListener('click', ()=>{
     if(!confirm('Clear all archive entries?')) return;
     if(sect==='all') archive=[]; else archive=archive.filter(e=>e.section!==sect);
+    archiveDetailId = null;
     saveArchive(); render();
   });
 };
