@@ -203,7 +203,7 @@
 
 <header class="header">
   <div class="header-row1">
-    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.5</span></div>
+    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.6</span></div>
     <div class="section-tabs">
       <button class="stab active" data-s="all">All</button>
       <button class="stab" data-s="work">Work</button>
@@ -372,19 +372,29 @@ const ARCHIVE_KEY = 'tadoo_archive';
 function loadData() {
   try { tasks   = JSON.parse(localStorage.getItem(TASKS_KEY)   || '[]'); } catch { tasks   = []; }
   try { archive = JSON.parse(localStorage.getItem(ARCHIVE_KEY) || '[]'); } catch { archive = []; }
-  tasks = tasks.map(t => ({
-    ...t,
-    recurrence: t.recurrence?.type === 'bizday'
+  let repaired = false;
+  tasks = tasks.map(t => {
+    const recurrence = t.recurrence?.type === 'bizday'
       ? { type:'monthly', monthlyMode:'bizday', bizDayN: t.recurrence.bizDayN || 1 }
-      : t.recurrence,
-    subtasks: (t.subtasks || []).map(s => ({
-      id: s.id || uid(),
-      title: s.title || '',
-      done: !!s.done,
-      bizDayN: s.bizDayN ? +s.bizDayN : null,
-      dayOfMonth: s.dayOfMonth ? +s.dayOfMonth : null
-    }))
-  }));
+      : t.recurrence;
+    const normalized = {
+      ...t,
+      recurrence,
+      subtasks: (t.subtasks || []).map(s => ({
+        id: s.id || uid(),
+        title: s.title || '',
+        done: !!s.done,
+        bizDayN: s.bizDayN ? +s.bizDayN : null,
+        dayOfMonth: s.dayOfMonth ? +s.dayOfMonth : null
+      }))
+    };
+    if (!normalized.dueDate && recurrence && recurrence.type !== 'none') {
+      normalized.dueDate = firstOccurrence(normalized);
+      repaired = true;
+    }
+    return normalized;
+  });
+  if (repaired) save();
 }
 function save()        { localStorage.setItem(TASKS_KEY,   JSON.stringify(tasks));   }
 function saveArchive() { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archive)); }
@@ -556,6 +566,61 @@ function nthBusinessDay(year, month, n) {
 
 function endOfMonth(year, month) {
   return new Date(year, month + 1, 0);
+}
+
+function firstOccurrence(task) {
+  const rec = task.recurrence;
+  if (!rec || rec.type === 'none') return task.dueDate || null;
+  const from = today();
+  if (task.dueDate) {
+    const due = parseDate(task.dueDate);
+    if (due && due >= from) return task.dueDate;
+  }
+  if (rec.type === 'daily') return ymd(from);
+  if (rec.type === 'weekly') {
+    const days = (rec.daysOfWeek||[]).slice().sort((a,b)=>a-b);
+    if (!days.length) return null;
+    for (let i = 0; i <= 14; i++) {
+      const c = new Date(from);
+      c.setDate(from.getDate() + i);
+      if (days.includes(c.getDay())) return ymd(c);
+    }
+    return null;
+  }
+  if (rec.type === 'monthly') {
+    if (rec.monthlyMode === 'eom') {
+      const currentEom = endOfMonth(from.getFullYear(), from.getMonth());
+      if (currentEom >= from) return ymd(currentEom);
+      return ymd(endOfMonth(from.getFullYear(), from.getMonth() + 1));
+    }
+    if (rec.monthlyMode === 'bizday') {
+      const nth = rec.bizDayN || 1;
+      const current = nthBusinessDay(from.getFullYear(), from.getMonth(), nth);
+      if (current && current >= from) return ymd(current);
+      const next = nthBusinessDay(from.getFullYear() + Math.floor((from.getMonth() + 1) / 12), (from.getMonth() + 1) % 12, nth);
+      return next ? ymd(next) : null;
+    }
+    if (rec.monthlyMode === 'carry') return ymd(from);
+    const days = (rec.daysOfMonth||[]).slice().sort((a,b)=>a-b);
+    if (!days.length) return ymd(from);
+    for (let mo = 0; mo < 13; mo++) {
+      const rawMo = from.getMonth() + mo;
+      const yr = from.getFullYear() + Math.floor(rawMo/12);
+      const month = rawMo % 12;
+      const maxDay = new Date(yr, month + 1, 0).getDate();
+      for (const day of days) {
+        if (day > maxDay) continue;
+        const c = new Date(yr, month, day);
+        if (c >= from) return ymd(c);
+      }
+    }
+    return null;
+  }
+  if (rec.type === 'yearly') {
+    if (task.dueDate) return task.dueDate;
+    return ymd(from);
+  }
+  return task.dueDate || null;
 }
 
 // ── Recurrence ─────────────────────────────────────────
@@ -1064,7 +1129,7 @@ document.getElementById('modalStInput').addEventListener('keydown', e=>{
 document.getElementById('taskForm').addEventListener('submit', e => {
   e.preventDefault();
   const title = document.getElementById('fTitle').value.trim(); if (!title) return;
-  const dueDate = document.getElementById('fDate').value || null;
+  let dueDate = document.getElementById('fDate').value || null;
   const dueTime = document.getElementById('fTime').value || null;
   const notes   = document.getElementById('fNotes').value.trim();
   const recType = document.getElementById('fRec').value;
@@ -1075,6 +1140,9 @@ document.getElementById('taskForm').addEventListener('submit', e => {
     recurrence.monthlyMode = recType==='bizday' ? 'bizday' : monthlyMode;
     if (monthlyMode==='date') recurrence.daysOfMonth = [...document.querySelectorAll('.dom-btn.sel')].map(b=>+b.dataset.day);
     if (recurrence.monthlyMode==='bizday') recurrence.bizDayN = +document.getElementById('fBizday').value;
+  }
+  if (!dueDate && recurrence.type !== 'none') {
+    dueDate = firstOccurrence({ dueDate, recurrence });
   }
   const subtasks = [...modalSubs];
   if (editId) {
