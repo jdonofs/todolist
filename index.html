@@ -50,6 +50,7 @@
     .st-bizlabel { font-size: 11px; font-weight: 600; color: var(--accent); background: rgba(59,130,246,0.1); padding: 1px 6px; border-radius: 999px; flex-shrink: 0; }
     .st-bizlabel.overdue { color: var(--danger); background: rgba(239,68,68,0.1); }
     .st-add-biz { width: auto; font-size: 12px; padding: 7px 8px; flex-shrink: 0; background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: var(--rsm); outline: none; -webkit-appearance: none; appearance: none; }
+    .monthly-mode { margin-bottom: 8px; }
     .modal-st-bizlabel { font-size: 11px; font-weight: 600; color: var(--accent); background: rgba(59,130,246,0.1); padding: 2px 7px; border-radius: 999px; margin-right: 4px; }
     .section-tabs { display: flex; gap: 2px; background: var(--surface); padding: 3px; border-radius: 999px; border: 1px solid var(--border); }
     .stab { padding: 5px 14px; border-radius: 999px; border: none; background: none; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
@@ -202,7 +203,7 @@
 
 <header class="header">
   <div class="header-row1">
-    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.4</span></div>
+    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.5</span></div>
     <div class="section-tabs">
       <button class="stab active" data-s="all">All</button>
       <button class="stab" data-s="work">Work</button>
@@ -276,12 +277,14 @@
         </div>
       </div>
       <div class="fg hidden" id="monthlyRow">
-        <label class="fl">Day(s) of the month</label>
+        <label class="fl">Monthly pattern</label>
+        <select id="fMonthlyMode" class="monthly-mode">
+          <option value="date">Specific day(s) of month</option>
+          <option value="eom">End of month</option>
+          <option value="bizday">Nth business day of month</option>
+          <option value="carry">Keep same date each month</option>
+        </select>
         <div class="dom-grid" id="domGrid"></div>
-        <div class="bizday-note">Optional. Leave this blank to repeat monthly using the task's current due date.</div>
-      </div>
-      <div class="fg hidden" id="bizdayRow">
-        <label class="fl">Business day of the month</label>
         <div class="bizday-row">
           <select id="fBizday" style="width:auto">
             <option value="1">1st</option><option value="2">2nd</option><option value="3">3rd</option>
@@ -291,7 +294,7 @@
           </select>
           <span style="font-size:14px;color:var(--muted)">business day</span>
         </div>
-        <div class="bizday-note">Skips weekends &amp; US federal holidays. E.g. "5th business day" in March 2025 = March 7.</div>
+        <div class="bizday-note" id="monthlyModeNote">Choose how this task should land each month.</div>
       </div>
       <div class="form-row">
         <div class="fg">
@@ -314,6 +317,20 @@
         <div class="modal-st-list" id="modalStList"></div>
         <div class="modal-st-add">
           <input type="text" id="modalStInput" placeholder="Add a subtask…" autocomplete="off">
+          <select id="modalStDay" class="st-add-biz" title="Optional: due on a specific day of the month">
+            <option value="">No day</option>
+            <option value="1">Day 1</option><option value="2">Day 2</option><option value="3">Day 3</option>
+            <option value="4">Day 4</option><option value="5">Day 5</option><option value="6">Day 6</option>
+            <option value="7">Day 7</option><option value="8">Day 8</option><option value="9">Day 9</option>
+            <option value="10">Day 10</option><option value="11">Day 11</option><option value="12">Day 12</option>
+            <option value="13">Day 13</option><option value="14">Day 14</option><option value="15">Day 15</option>
+            <option value="16">Day 16</option><option value="17">Day 17</option><option value="18">Day 18</option>
+            <option value="19">Day 19</option><option value="20">Day 20</option><option value="21">Day 21</option>
+            <option value="22">Day 22</option><option value="23">Day 23</option><option value="24">Day 24</option>
+            <option value="25">Day 25</option><option value="26">Day 26</option><option value="27">Day 27</option>
+            <option value="28">Day 28</option><option value="29">Day 29</option><option value="30">Day 30</option>
+            <option value="31">Day 31</option>
+          </select>
           <select id="modalStBiz" class="st-add-biz" title="Optional: due on Nth business day of month">
             <option value="">No biz day</option>
             <option value="1">1st biz</option><option value="2">2nd biz</option><option value="3">3rd biz</option>
@@ -357,11 +374,15 @@ function loadData() {
   try { archive = JSON.parse(localStorage.getItem(ARCHIVE_KEY) || '[]'); } catch { archive = []; }
   tasks = tasks.map(t => ({
     ...t,
+    recurrence: t.recurrence?.type === 'bizday'
+      ? { type:'monthly', monthlyMode:'bizday', bizDayN: t.recurrence.bizDayN || 1 }
+      : t.recurrence,
     subtasks: (t.subtasks || []).map(s => ({
       id: s.id || uid(),
       title: s.title || '',
       done: !!s.done,
-      bizDayN: s.bizDayN ? +s.bizDayN : null
+      bizDayN: s.bizDayN ? +s.bizDayN : null,
+      dayOfMonth: s.dayOfMonth ? +s.dayOfMonth : null
     }))
   }));
 }
@@ -533,7 +554,42 @@ function nthBusinessDay(year, month, n) {
   return null; // month has fewer than n business days
 }
 
+function endOfMonth(year, month) {
+  return new Date(year, month + 1, 0);
+}
+
 // ── Recurrence ─────────────────────────────────────────
+function recText(rec) {
+  if (!rec || rec.type === 'none') return null;
+  if (rec.type === 'daily') return 'Repeats daily';
+  if (rec.type === 'yearly') return 'Repeats yearly';
+  if (rec.type === 'weekly') {
+    const dn = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+    return 'Repeats ' + ((rec.daysOfWeek||[]).map(d=>dn[d]).join(' ') || 'weekly');
+  }
+  if (rec.type === 'monthly') {
+    if (rec.monthlyMode === 'eom') return 'Repeats end of month';
+    if (rec.monthlyMode === 'bizday') return `Repeats ${ordinal(rec.bizDayN||1)} business day`;
+    if (rec.monthlyMode === 'carry') return 'Repeats same date monthly';
+    const days = (rec.daysOfMonth||[]).slice().sort((a,b)=>a-b);
+    return 'Repeats ' + (days.join(', ') || 'monthly');
+  }
+  if (rec.type === 'bizday') return `Repeats ${ordinal(rec.bizDayN||1)} business day`;
+  return null;
+}
+
+function subtaskScheduleMeta(subtask, task) {
+  if (subtask.dayOfMonth) return `Day ${subtask.dayOfMonth} of month`;
+  if (!subtask.bizDayN) return null;
+  const parts = [`${ordinal(subtask.bizDayN)} business day`];
+  if (task.dueDate) {
+    const base = parseDate(task.dueDate);
+    const actual = nthBusinessDay(base.getFullYear(), base.getMonth(), subtask.bizDayN);
+    if (actual) parts.push(actual.toLocaleDateString('en-US', {month:'short', day:'numeric'}));
+  }
+  return parts.join(' - ');
+}
+
 function recLabel(rec) {
   if (!rec || rec.type === 'none') return null;
   if (rec.type === 'daily') return 'â†º Daily';
@@ -575,6 +631,30 @@ function nextOccurrence(task) {
     return null;
   }
   if (rec.type === 'monthly') {
+    if (rec.monthlyMode === 'eom') {
+      let yr = from.getFullYear(), mo = from.getMonth();
+      for (let i = 0; i < 13; i++) {
+        const d = endOfMonth(yr, mo + i);
+        if (d > from) return ymd(d);
+      }
+      return null;
+    }
+    if (rec.monthlyMode === 'bizday') {
+      const nth = rec.bizDayN || 1;
+      let yr = from.getFullYear(), mo = from.getMonth();
+      for (let i = 0; i < 13; i++) {
+        const totalMo = mo + i;
+        const d = nthBusinessDay(yr + Math.floor(totalMo / 12), totalMo % 12, nth);
+        if (d && d > from) return ymd(d);
+      }
+      return null;
+    }
+    if (rec.monthlyMode === 'carry') {
+      const base = task.dueDate ? parseDate(task.dueDate) : from;
+      let next = addMonthsClamped(base, 1);
+      while (next <= from) next = addMonthsClamped(next, 1);
+      return ymd(next);
+    }
     const days = (rec.daysOfMonth||[]).slice().sort((a,b)=>a-b);
     if (!days.length) {
       const base = task.dueDate ? parseDate(task.dueDate) : from;
@@ -660,7 +740,7 @@ function render() {
 
 function makeCard(task) {
   const over = isOverdue(task), tod = isDueToday(task);
-  const rl = recLabel(task.recurrence), dl = dueLbl(task.dueDate, task.dueTime);
+  const rl = recText(task.recurrence), dl = dueLbl(task.dueDate, task.dueTime);
   const subs = task.subtasks || [];
   const subDone = subs.filter(s=>s.done).length;
   const hasSubs = subs.length > 0;
@@ -722,7 +802,7 @@ function renderSubtaskArea(task) {
       </button>
       <div class="st-copy">
         <div class="st-label${s.done?' done':''}">${esc(s.title)}</div>
-        ${s.bizDayN ? `<div class="st-meta">${esc(subtaskBizMeta(s, task))}</div>` : ''}
+        ${(s.dayOfMonth || s.bizDayN) ? `<div class="st-meta">${esc(subtaskScheduleMeta(s, task))}</div>` : ''}
       </div>
       <button type="button" class="st-del" data-std="${task.id}:${s.id}">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -733,6 +813,20 @@ function renderSubtaskArea(task) {
     ${items}
     <div class="st-add-row">
       <input class="st-add-input" type="text" placeholder="Add subtask…" data-sadd="${task.id}" autocomplete="off">
+      <select class="st-add-biz" data-saddday="${task.id}" title="Optional: due on a specific day of the month">
+        <option value="">No day</option>
+        <option value="1">Day 1</option><option value="2">Day 2</option><option value="3">Day 3</option>
+        <option value="4">Day 4</option><option value="5">Day 5</option><option value="6">Day 6</option>
+        <option value="7">Day 7</option><option value="8">Day 8</option><option value="9">Day 9</option>
+        <option value="10">Day 10</option><option value="11">Day 11</option><option value="12">Day 12</option>
+        <option value="13">Day 13</option><option value="14">Day 14</option><option value="15">Day 15</option>
+        <option value="16">Day 16</option><option value="17">Day 17</option><option value="18">Day 18</option>
+        <option value="19">Day 19</option><option value="20">Day 20</option><option value="21">Day 21</option>
+        <option value="22">Day 22</option><option value="23">Day 23</option><option value="24">Day 24</option>
+        <option value="25">Day 25</option><option value="26">Day 26</option><option value="27">Day 27</option>
+        <option value="28">Day 28</option><option value="29">Day 29</option><option value="30">Day 30</option>
+        <option value="31">Day 31</option>
+      </select>
       <select class="st-add-biz" data-saddbiz="${task.id}" title="Optional: due on Nth business day of month">
         <option value="">No biz day</option>
         <option value="1">1st biz</option><option value="2">2nd biz</option><option value="3">3rd biz</option>
@@ -757,30 +851,47 @@ function wireSubtaskArea(cardEl, task) {
   // Add subtask via button
   const addBtn = cardEl.querySelector('[data-saddbtn]');
   const addInput = cardEl.querySelector('[data-sadd]');
+  const addDay = cardEl.querySelector('[data-saddday]');
   const addBiz = cardEl.querySelector('[data-saddbiz]');
   if (addBtn && addInput) {
     const submit = e => {
       e.stopPropagation();
-      addSubtask(task.id, addInput.value, addBiz?.value);
+      addSubtask(task.id, addInput.value, addDay?.value, addBiz?.value);
       addInput.value = '';
+      if (addDay) addDay.value = '';
       if (addBiz) addBiz.value = '';
       addInput.focus();
     };
     addBtn.addEventListener('click', submit);
     addInput.addEventListener('keydown', e => { if (e.key==='Enter') { e.preventDefault(); submit(e); } });
     addInput.addEventListener('click', e => e.stopPropagation());
-    if (addBiz) addBiz.addEventListener('click', e => e.stopPropagation());
+    if (addDay) {
+      addDay.addEventListener('click', e => e.stopPropagation());
+      addDay.addEventListener('change', e => { if (e.target.value && addBiz) addBiz.value=''; });
+    }
+    if (addBiz) {
+      addBiz.addEventListener('click', e => e.stopPropagation());
+      addBiz.addEventListener('change', e => { if (e.target.value && addDay) addDay.value=''; });
+    }
   }
 }
 
 // ── Subtask operations ─────────────────────────────────
-function addSubtask(taskId, title, bizDayN='') {
+function addSubtask(taskId, title, dayOfMonth='', bizDayN='') {
   title = (title||'').trim();
   if (!title) return;
   const idx = tasks.findIndex(t=>t.id===taskId);
   if (idx===-1) return;
   if (!tasks[idx].subtasks) tasks[idx].subtasks = [];
-  tasks[idx].subtasks.push({ id:uid(), title, done:false, bizDayN: bizDayN ? +bizDayN : null });
+  const dayNum = dayOfMonth ? +dayOfMonth : null;
+  const bizNum = dayNum ? null : (bizDayN ? +bizDayN : null);
+  tasks[idx].subtasks.push({
+    id:uid(),
+    title,
+    done:false,
+    dayOfMonth: dayNum,
+    bizDayN: bizNum
+  });
   save(); render();
 }
 
@@ -849,6 +960,8 @@ function openAdd() {
   pickSect(sect!=='all' ? sect : 'work');
   document.getElementById('deleteRow').style.display = 'none';
   document.querySelectorAll('.dchip, .dom-btn').forEach(b=>b.classList.remove('sel'));
+  document.getElementById('fMonthlyMode').value = 'date';
+  document.getElementById('modalStDay').value = '';
   document.getElementById('modalStBiz').value = '';
   renderModalSubs();
   document.getElementById('overlay').classList.remove('hidden');
@@ -866,10 +979,13 @@ function openEdit(id) {
   document.getElementById('fNotes').value  = task.notes    || '';
   pickSect(task.section);
   const rec = task.recurrence || {type:'none'};
-  document.getElementById('fRec').value = rec.type; syncRecUI();
+  document.getElementById('fRec').value = rec.type;
+  document.getElementById('fMonthlyMode').value = rec.monthlyMode || (rec.type==='bizday' ? 'bizday' : 'date');
+  syncRecUI();
   document.querySelectorAll('.dchip').forEach(b=>b.classList.toggle('sel', rec.type==='weekly'&&(rec.daysOfWeek||[]).includes(+b.dataset.d)));
-  document.querySelectorAll('.dom-btn').forEach(b=>b.classList.toggle('sel', rec.type==='monthly'&&(rec.daysOfMonth||[]).includes(+b.dataset.day)));
-  if (rec.type==='bizday') document.getElementById('fBizday').value = rec.bizDayN||1;
+  document.querySelectorAll('.dom-btn').forEach(b=>b.classList.toggle('sel', rec.type==='monthly' && (rec.monthlyMode||'date')==='date' && (rec.daysOfMonth||[]).includes(+b.dataset.day)));
+  if (rec.type==='bizday' || (rec.type==='monthly' && rec.monthlyMode==='bizday')) document.getElementById('fBizday').value = rec.bizDayN||1;
+  document.getElementById('modalStDay').value = '';
   document.getElementById('modalStBiz').value = '';
   renderModalSubs();
   document.getElementById('deleteRow').style.display = 'block';
@@ -888,9 +1004,18 @@ function pickSect(s) {
 
 function syncRecUI() {
   const v = document.getElementById('fRec').value;
+  if (v === 'bizday') document.getElementById('fMonthlyMode').value = 'bizday';
+  const monthlyMode = document.getElementById('fMonthlyMode')?.value || 'date';
   document.getElementById('weeklyRow').classList.toggle('hidden',  v!=='weekly');
-  document.getElementById('monthlyRow').classList.toggle('hidden', v!=='monthly');
-  document.getElementById('bizdayRow').classList.toggle('hidden',  v!=='bizday');
+  document.getElementById('monthlyRow').classList.toggle('hidden', v!=='monthly' && v!=='bizday');
+  document.getElementById('domGrid').style.display = (v==='monthly' && monthlyMode==='date') ? 'grid' : 'none';
+  document.querySelector('#monthlyRow .bizday-row').style.display = ((v==='monthly' || v==='bizday') && monthlyMode==='bizday') ? 'flex' : 'none';
+  const note = document.getElementById('monthlyModeNote');
+  if (v !== 'monthly' && v !== 'bizday') return;
+  if (monthlyMode === 'date') note.textContent = 'Pick one or more calendar days for the parent task.';
+  if (monthlyMode === 'eom') note.textContent = 'This task will always land on the last day of the month.';
+  if (monthlyMode === 'bizday') note.textContent = 'Skips weekends and US federal holidays for the parent task.';
+  if (monthlyMode === 'carry') note.textContent = 'Uses the current due date and carries that date forward month to month.';
 }
 
 // Modal subtasks
@@ -900,7 +1025,7 @@ function renderModalSubs() {
     <div class="modal-st-item">
       <div class="modal-st-copy">
         <div class="modal-st-title">${esc(s.title)}</div>
-        ${s.bizDayN ? `<div class="modal-st-meta">${ordinal(s.bizDayN)} business day</div>` : ''}
+        ${s.dayOfMonth ? `<div class="modal-st-meta">Day ${s.dayOfMonth} of month</div>` : s.bizDayN ? `<div class="modal-st-meta">${ordinal(s.bizDayN)} business day</div>` : ''}
       </div>
       <button type="button" class="modal-st-del" data-mstd="${s.id}">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -913,10 +1038,19 @@ function renderModalSubs() {
 
 document.getElementById('modalStAddBtn').addEventListener('click', () => {
   const inp = document.getElementById('modalStInput');
+  const day = document.getElementById('modalStDay');
   const biz = document.getElementById('modalStBiz');
   const title = inp.value.trim(); if (!title) return;
-  modalSubs.push({id:uid(), title, done:false, bizDayN: biz.value ? +biz.value : null});
+  const dayNum = day.value ? +day.value : null;
+  modalSubs.push({
+    id:uid(),
+    title,
+    done:false,
+    dayOfMonth: dayNum,
+    bizDayN: dayNum ? null : (biz.value ? +biz.value : null)
+  });
   inp.value = '';
+  day.value = '';
   biz.value = '';
   renderModalSubs();
   inp.focus();
@@ -934,10 +1068,14 @@ document.getElementById('taskForm').addEventListener('submit', e => {
   const dueTime = document.getElementById('fTime').value || null;
   const notes   = document.getElementById('fNotes').value.trim();
   const recType = document.getElementById('fRec').value;
-  const recurrence = {type:recType};
+  const monthlyMode = document.getElementById('fMonthlyMode').value;
+  const recurrence = {type: recType==='bizday' ? 'monthly' : recType};
   if (recType==='weekly')  recurrence.daysOfWeek  = [...document.querySelectorAll('.dchip.sel')].map(b=>+b.dataset.d);
-  if (recType==='monthly') recurrence.daysOfMonth = [...document.querySelectorAll('.dom-btn.sel')].map(b=>+b.dataset.day);
-  if (recType==='bizday')  recurrence.bizDayN     = +document.getElementById('fBizday').value;
+  if (recType==='monthly' || recType==='bizday') {
+    recurrence.monthlyMode = recType==='bizday' ? 'bizday' : monthlyMode;
+    if (monthlyMode==='date') recurrence.daysOfMonth = [...document.querySelectorAll('.dom-btn.sel')].map(b=>+b.dataset.day);
+    if (recurrence.monthlyMode==='bizday') recurrence.bizDayN = +document.getElementById('fBizday').value;
+  }
   const subtasks = [...modalSubs];
   if (editId) {
     const idx = tasks.findIndex(t=>t.id===editId);
@@ -965,6 +1103,9 @@ document.querySelectorAll('.vtab').forEach(b=>b.addEventListener('click', ()=>{
 }));
 document.querySelectorAll('.sp-opt').forEach(b=>b.addEventListener('click', ()=>pickSect(b.dataset.v)));
 document.getElementById('fRec').addEventListener('change', syncRecUI);
+document.getElementById('fMonthlyMode').addEventListener('change', syncRecUI);
+document.getElementById('modalStDay').addEventListener('change', e=>{ if (e.target.value) document.getElementById('modalStBiz').value=''; });
+document.getElementById('modalStBiz').addEventListener('change', e=>{ if (e.target.value) document.getElementById('modalStDay').value=''; });
 document.querySelectorAll('.dchip').forEach(b=>b.addEventListener('click', ()=>b.classList.toggle('sel')));
 document.getElementById('fabBtn').addEventListener('click', openAdd);
 document.getElementById('closeBtn').addEventListener('click', closeModal);
