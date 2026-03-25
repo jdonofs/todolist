@@ -218,7 +218,7 @@
 
 <header class="header">
   <div class="header-row1">
-    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.10</span></div>
+    <div class="app-name">Ta<span>doo</span> <span class="app-ver">v1.11</span></div>
     <div class="section-tabs">
       <button class="stab active" data-s="all">All</button>
       <button class="stab" data-s="work">Work</button>
@@ -528,6 +528,15 @@ function dueLbl(dateStr, timeStr) {
     s += ` · ${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}`;
   }
   return s;
+}
+
+function dueInLbl(dateStr) {
+  if (!dateStr) return null;
+  const d = parseDate(dateStr), t = today();
+  const diff = Math.round((d - t) / 86400000);
+  if (diff <= 0) return null;
+  if (diff === 1) return 'Due in 1 day';
+  return `Due in ${diff} days`;
 }
 
 function recLbl(rec) {
@@ -927,7 +936,7 @@ function renderItemCard(item) {
 
 function makeCard(task) {
   const over = isOverdue(task), tod = isDueToday(task);
-  const rl = recText(task.recurrence), dl = dueLbl(task.dueDate, task.dueTime);
+  const rl = recText(task.recurrence), dl = dueLbl(task.dueDate, task.dueTime), xil = dueInLbl(task.dueDate);
   const subs = task.subtasks || [];
   const subDone = subs.filter(s=>s.done).length;
   const hasSubs = subs.length > 0;
@@ -951,6 +960,7 @@ function makeCard(task) {
       <div class="card-meta">
         ${over   ? '<span class="badge b-overdue">Overdue</span>' : ''}
         ${tod    ? '<span class="badge b-today">Today</span>'    : ''}
+        ${xil    ? `<span class="badge b-today">${xil}</span>` : ''}
         ${dl     ? `<span class="due-text${over?' overdue':tod?' today':''}">${dl}</span>` : ''}
         ${rl     ? `<span class="badge b-rec">${rl}</span>` : ''}
         ${hasSubs? `<span class="badge b-sub">${subDone}/${subs.length} done</span>` : ''}
